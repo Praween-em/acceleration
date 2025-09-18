@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="en">
 <head>
@@ -18,14 +19,12 @@
   }
   #title{font-weight:700}
   #container{flex:1;display:flex;flex-direction:row;gap:12px;padding:12px}
-  /* keep your look but allow shrinking on small screens */
   #canvas-wrap{flex:1;background:#cfeffd;border-radius:10px;position:relative;overflow:hidden}
   #ui{
     width:380px;min-width:220px;max-width:420px;background:rgba(255,255,255,0.98);border-radius:10px;padding:12px;
     box-shadow:0 6px 18px rgba(0,0,0,0.12);display:flex;flex-direction:column;gap:10px;
     flex-shrink:1;
   }
-
   label{font-size:13px;color:#111}
   .row{display:flex;align-items:center;gap:10px}
   input[type=range]{flex:1}
@@ -34,8 +33,6 @@
   .small{font-size:13px;color:#222}
   .metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;padding:8px;background:#fff;border-radius:8px}
   .metric{background:#f7fafc;padding:8px;border-radius:6px;text-align:center;font-weight:600}
-  canvas.plot{width:100%;height:120px;border-radius:8px;background:white;display:block}
-
   /* responsive */
   @media (max-width:980px){
     #container{flex-direction:column}
@@ -80,10 +77,6 @@
         <div class="metric">Acceleration a (m/s²)<div id="aValDisp">1.00</div></div>
       </div>
 
-      <div class="small">Plots (v vs t and s vs t)</div>
-      <canvas id="vPlot" class="plot"></canvas>
-      <canvas id="sPlot" class="plot"></canvas>
-
       <div class="small" style="opacity:0.8">
         Explanation: Change v₀ and a, Start to see how velocity changes linearly with time and displacement follows quadratic growth.
       </div>
@@ -95,7 +88,7 @@
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 
 <script>
-/* ---------- Simulation parameters and UI ---------- */
+/* ---------- DOM ---------- */
 const dom = {
   container: document.getElementById('canvas-wrap'),
   startBtn: document.getElementById('startBtn'),
@@ -112,8 +105,6 @@ const dom = {
   sVal: document.getElementById('sVal'),
   vVal: document.getElementById('vVal'),
   aValDisp: document.getElementById('aValDisp'),
-  vPlot: document.getElementById('vPlot'),
-  sPlot: document.getElementById('sPlot'),
 };
 
 let width = dom.container.clientWidth;
@@ -128,376 +119,111 @@ const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
 renderer.setPixelRatio(window.devicePixelRatio || 1);
 dom.container.appendChild(renderer.domElement);
 
-/* Lights */
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const sun = new THREE.DirectionalLight(0xffffff, 0.8);
 sun.position.set(50, 80, 20);
 scene.add(sun);
 
-/* Ground + track */
-const TRACK_LENGTH = 120; // meters visual
-const TRACK_Z = 0;
-const trackY = 0;
+/* Track */
+const TRACK_LENGTH = 120;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(TRACK_LENGTH*1.2,20), new THREE.MeshStandardMaterial({ color: 0xe6f3f9 }));
+ground.rotation.x = -Math.PI/2; scene.add(ground);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(TRACK_LENGTH * 1.2, 20),
-  new THREE.MeshStandardMaterial({ color: 0xe6f3f9 })
-);
-ground.rotation.x = -Math.PI/2;
-scene.add(ground);
+const track = new THREE.Mesh(new THREE.BoxGeometry(TRACK_LENGTH,0.15,6), new THREE.MeshStandardMaterial({ color: 0x424242 }));
+track.position.y = 0.075; scene.add(track);
 
-const track = new THREE.Mesh(
-  new THREE.BoxGeometry(TRACK_LENGTH, 0.15, 6),
-  new THREE.MeshStandardMaterial({ color: 0x424242 })
-);
-track.position.y = 0.075;
-scene.add(track);
+const startLine = new THREE.Mesh(new THREE.BoxGeometry(0.1,0.2,6.5), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+startLine.position.x = -TRACK_LENGTH/2 + 1; startLine.position.y = 0.2; scene.add(startLine);
 
-/* start line and scale ticks so students perceive meter scale */
-const startLine = new THREE.Mesh(
-  new THREE.BoxGeometry(0.1, 0.2, 6.5),
-  new THREE.MeshStandardMaterial({ color: 0xffffff })
-);
-startLine.position.x = -TRACK_LENGTH/2 + 1;
-startLine.position.y = 0.2;
-scene.add(startLine);
-
-/* ticks every 10m */
+/* ticks */
+function makeTextSprite(message){
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  context.font = "24px Arial";
+  const textWidth = context.measureText(message).width;
+  canvas.width = textWidth + 20;
+  canvas.height = 36;
+  context.fillStyle = "rgba(255,255,255,0.9)";
+  context.fillRect(0,0,canvas.width,canvas.height);
+  context.fillStyle = "black";
+  context.font = "24px Arial";
+  context.fillText(message,10,24);
+  const texture = new THREE.CanvasTexture(canvas);
+  return new THREE.Sprite(new THREE.SpriteMaterial({map:texture}));
+}
 for(let i=0;i<=TRACK_LENGTH;i+=10){
-  const tick = new THREE.Mesh(
-    new THREE.BoxGeometry(0.05, 0.15, 0.6),
-    new THREE.MeshStandardMaterial({ color: 0xffffff })
-  );
-  tick.position.x = -TRACK_LENGTH/2 + i;
-  tick.position.y = 0.2;
-  tick.position.z = 3.3;
-  scene.add(tick);
-
-  const label = makeTextSprite(i + 'm', {fontsize: 40, borderColor: {r:0,g:0,b:0,a:1}, backgroundColor:{r:255,g:255,b:255,a:0.8}});
-  label.position.set(tick.position.x, 0.9, 3.8);
-  label.scale.set(0.8,0.4,1);
-  scene.add(label);
+  const tick = new THREE.Mesh(new THREE.BoxGeometry(0.05,0.15,0.6), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+  tick.position.x = -TRACK_LENGTH/2 + i; tick.position.y = 0.2; tick.position.z = 3.3; scene.add(tick);
+  const label = makeTextSprite(i+'m'); label.position.set(tick.position.x,0.9,3.8); label.scale.set(0.8,0.4,1); scene.add(label);
 }
 
-/* ---------- CART: make it bigger and clearly above track ---------- */
+/* cart */
 function makeCart(){
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(4.5, 1.6, 2.4),
-    new THREE.MeshStandardMaterial({ color: 0xff3333, metalness: 0.2, roughness: 0.5 })
-  );
-  body.position.y = 1.05; // lifted above track
-  group.add(body);
-
-  // wheels (larger)
+  const body = new THREE.Mesh(new THREE.BoxGeometry(4.5,1.6,2.4), new THREE.MeshStandardMaterial({ color: 0xff3333 }));
+  body.position.y = 1.05; group.add(body);
   const wgeo = new THREE.CylinderGeometry(0.45,0.45,0.6,20);
   const wmat = new THREE.MeshStandardMaterial({ color: 0x111111 });
   const wheels = [];
   [[1.7,-1.1],[ -1.7,-1.1 ],[1.7,1.1],[-1.7,1.1]].forEach(pos=>{
-    const w = new THREE.Mesh(wgeo, wmat);
-    w.rotation.z = Math.PI/2;
-    w.position.set(pos[0],0.45,pos[1]);
-    group.add(w); wheels.push(w);
+    const w=new THREE.Mesh(wgeo,wmat); w.rotation.z=Math.PI/2; w.position.set(pos[0],0.45,pos[1]); group.add(w); wheels.push(w);
   });
-  group.userData.wheels = wheels;
+  group.userData.wheels=wheels;
   return group;
 }
-const cart = makeCart();
-scene.add(cart);
+const cart=makeCart(); scene.add(cart);
 
-/* ---------- TRAIL (path) ---------- */
-const maxTrailPoints = 1000;
-let trailPositions = [ cart.position.clone() ];
-const trailGeometry = new THREE.BufferGeometry();
-trailGeometry.setFromPoints(trailPositions);
-const trailMaterial = new THREE.LineBasicMaterial({ color: 0x00a3ff });
-const trail = new THREE.Line(trailGeometry, trailMaterial);
+/* trail */
+const trailGeometry=new THREE.BufferGeometry().setFromPoints([cart.position.clone()]);
+const trail=new THREE.Line(trailGeometry,new THREE.LineBasicMaterial({color:0x00a3ff}));
 scene.add(trail);
+let trailPositions=[cart.position.clone()];
 
-/* arrows: velocity and acceleration */
-let velArrow = null, accArrow = null;
+let velArrow=null, accArrow=null;
 function updateArrows(){
-  if(velArrow){ scene.remove(velArrow); velArrow = null; }
-  if(accArrow){ scene.remove(accArrow); accArrow = null; }
+  if(velArrow){scene.remove(velArrow);} if(accArrow){scene.remove(accArrow);}
   if(dom.vectorsBox.checked){
-    velArrow = new THREE.ArrowHelper(new THREE.Vector3(1,0,0).normalize(), cart.position.clone().add(new THREE.Vector3(0,1.4,0)), Math.max(0.2, Math.abs(state.v)*0.18), 0x00a3ff, 0.5, 0.25);
-    accArrow = new THREE.ArrowHelper(new THREE.Vector3(state.a>=0?1:-1,0,0).normalize(), cart.position.clone().add(new THREE.Vector3(0,2.3,0)), Math.max(0.2, Math.abs(state.a)*0.6), 0xffaa00, 0.5, 0.25);
+    velArrow=new THREE.ArrowHelper(new THREE.Vector3(1,0,0),cart.position.clone().add(new THREE.Vector3(0,1.4,0)),Math.max(0.2,Math.abs(state.v)*0.18),0x00a3ff);
+    accArrow=new THREE.ArrowHelper(new THREE.Vector3(state.a>=0?1:-1,0,0),cart.position.clone().add(new THREE.Vector3(0,2.3,0)),Math.max(0.2,Math.abs(state.a)*0.6),0xffaa00);
     scene.add(velArrow); scene.add(accArrow);
   }
 }
 
-/* 2D plotting helpers (simple immediate-mode plots) */
-function Plot2D(canvas){
-  this.canvas = canvas;
-  this.ctx = canvas.getContext('2d');
-  this.data = [];
-  this.maxX = 10;
-  this.maxY = 10;
-}
-Plot2D.prototype.push = function(x,y){ this.data.push([x,y]); if (x>this.maxX) this.maxX = x; if (Math.abs(y)>this.maxY) this.maxY = Math.max(this.maxY, Math.abs(y)); };
-Plot2D.prototype.clear = function(){ this.data=[]; this.maxX=10; this.maxY=10; this.draw(); };
-Plot2D.prototype.draw = function(){
-  const c=this.canvas, ctx=this.ctx;
-  const W=c.width, H=c.height;
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#fff'; ctx.fillRect(0,0,W,H);
-  // axes
-  ctx.strokeStyle='#ddd'; ctx.beginPath(); ctx.moveTo(40,10); ctx.lineTo(40,H-30); ctx.lineTo(W-10,H-30); ctx.stroke();
-  // grid lines
-  ctx.strokeStyle='#f0f0f0';
-  for(let gx=0; gx<=5; gx++){
-    const x = 40 + (W-60)*(gx/5);
-    ctx.beginPath(); ctx.moveTo(x,10); ctx.lineTo(x,H-30); ctx.stroke();
+/* state */
+const state={t:0,s:0,v:parseFloat(dom.v0.value),a:parseFloat(dom.aRange.value),running:false,lastFrame:null,boundaryReached:false};
+const TRACK_START=0, TRACK_END=TRACK_LENGTH-3;
+
+/* UI events */
+dom.v0.addEventListener('input',()=>{state.v=parseFloat(dom.v0.value);dom.v0Val.textContent=state.v.toFixed(1);if(!state.running)dom.vVal.textContent=state.v.toFixed(2);});
+dom.aRange.addEventListener('input',()=>{state.a=parseFloat(dom.aRange.value);dom.aShow.textContent=state.a.toFixed(2);dom.aValDisp.textContent=state.a.toFixed(2);});
+dom.startBtn.addEventListener('click',()=>{if(!state.running&&!state.boundaryReached){state.running=true;state.lastFrame=performance.now();dom.startBtn.textContent='Running';}});
+dom.pauseBtn.addEventListener('click',()=>{state.running=false;state.boundaryReached=false;dom.startBtn.textContent='Start';});
+dom.stopBtn.addEventListener('click',()=>{state.running=false;state.boundaryReached=false;resetToStart();dom.startBtn.textContent='Start';});
+dom.resetBtn.addEventListener('click',()=>{resetAll();dom.startBtn.textContent='Start';});
+
+function resetToStart(){state.t=0;state.s=0;state.v=parseFloat(dom.v0.value);state.boundaryReached=false;trailPositions=[cart.position.clone()];trail.geometry.setFromPoints(trailPositions);updateCartTransform();updateUI();}
+function resetAll(){state.t=0;state.s=0;state.v=parseFloat(dom.v0.value);state.a=parseFloat(dom.aRange.value);state.boundaryReached=false;trailPositions=[cart.position.clone()];trail.geometry.setFromPoints(trailPositions);updateCartTransform();updateUI();}
+function sToX(s){return -TRACK_LENGTH/2+1+s;}
+function updateCartTransform(){cart.position.x=sToX(state.s);cart.position.y=0;cart.position.z=0;if(cart.userData.wheels){cart.userData.wheels.forEach(w=>{w.rotation.x-=state.v*0.04;});}const last=trailPositions[trailPositions.length-1];const curr=cart.position.clone();if(!last||curr.distanceTo(last)>0.01){trailPositions.push(curr);if(trailPositions.length>1000)trailPositions.shift();trail.geometry.setFromPoints(trailPositions);}updateArrows();}
+function updateUI(){dom.tVal.textContent=state.t.toFixed(2);dom.sVal.textContent=state.s.toFixed(2);dom.vVal.textContent=state.v.toFixed(2);dom.aValDisp.textContent=state.a.toFixed(2);}
+
+camera.position.set(0,18,18);camera.lookAt(0,0,0);
+
+function resizeRenderer(){const rect=dom.container.getBoundingClientRect();width=rect.width;height=rect.height;renderer.setSize(width,Math.max(height,200));camera.aspect=width/Math.max(height,200);camera.updateProjectionMatrix();}
+window.addEventListener('resize',resizeRenderer);
+
+function tick(now){requestAnimationFrame(tick);resizeRenderer();
+  if(state.running&&!state.boundaryReached){
+    const dt=Math.min((now-(state.lastFrame||now))/1000,0.05);state.lastFrame=now;
+    state.s=state.s+state.v*dt+0.5*state.a*dt*dt;state.v=state.v+state.a*dt;state.t+=dt;
+    if(state.s<TRACK_START){state.s=TRACK_START;state.v=0;state.running=false;state.boundaryReached=true;dom.startBtn.textContent='Start';}
+    else if(state.s>TRACK_END){state.s=TRACK_END;state.v=0;state.running=false;state.boundaryReached=true;dom.startBtn.textContent='Start';}
+    updateCartTransform();updateUI();
   }
-  // plot
-  if(this.data.length>1){
-    ctx.strokeStyle = '#0077cc'; ctx.lineWidth=2; ctx.beginPath();
-    for(let i=0;i<this.data.length;i++){
-      const [x,y]=this.data[i];
-      const px = 40 + (W-60)*(x/this.maxX);
-      const py = (H-30) - (H-40)*( (y + this.maxY) / (2*this.maxY) ); // center y
-      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
-    }
-    ctx.stroke();
-  }
-  // labels
-  ctx.fillStyle='#333'; ctx.font='12px Arial'; ctx.fillText('t (s)', W/2, H-6);
-};
-
-/* Plots */
-const vplot = new Plot2D(dom.vPlot);
-const splot = new Plot2D(dom.sPlot);
-
-/* ---------- Simulation state ---------- */
-const state = {
-  t: 0.0,
-  s: 0.0,     // position in m (we'll map it to X on track)
-  v: parseFloat(dom.v0.value), // m/s
-  a: parseFloat(dom.aRange.value),
-  running: false,
-  lastFrame: null,
-  boundaryReached: false
-};
-
-// Define track boundaries
-const TRACK_START = 0;
-const TRACK_END = TRACK_LENGTH - 3; // 117 meters (leaving some margin at the end)
-
-/* initialise UI labels */
-dom.v0Val.textContent = state.v.toFixed(1);
-dom.aShow.textContent = state.a.toFixed(2);
-dom.aValDisp.textContent = state.a.toFixed(2);
-dom.tVal.textContent = state.t.toFixed(2);
-dom.sVal.textContent = state.s.toFixed(2);
-dom.vVal.textContent = state.v.toFixed(2);
-
-dom.v0.addEventListener('input', ()=> {
-  state.v = parseFloat(dom.v0.value);
-  dom.v0Val.textContent = parseFloat(dom.v0.value).toFixed(1);
-  if(!state.running) dom.vVal.textContent = state.v.toFixed(2);
-});
-dom.aRange.addEventListener('input', ()=> {
-  state.a = parseFloat(dom.aRange.value);
-  dom.aShow.textContent = state.a.toFixed(2);
-  dom.aValDisp.textContent = state.a.toFixed(2);
-});
-
-/* UI actions */
-dom.startBtn.addEventListener('click', ()=> {
-  if(!state.running && !state.boundaryReached){
-    state.running = true;
-    state.lastFrame = performance.now();
-    dom.startBtn.textContent = 'Running';
-  }
-});
-dom.pauseBtn.addEventListener('click', ()=> { state.running=false; state.boundaryReached=false; dom.startBtn.textContent='Start'; });
-dom.stopBtn.addEventListener('click', ()=> { state.running=false; state.boundaryReached=false; resetToStart(); dom.startBtn.textContent='Start'; });
-dom.resetBtn.addEventListener('click', ()=> { state.running=false; state.boundaryReached=false; resetAll(); dom.startBtn.textContent='Start'; });
-
-function resetToStart(){
-  state.t = 0; state.s = 0; state.v = parseFloat(dom.v0.value); state.lastFrame = performance.now();
-  state.boundaryReached = false;
-  trailPositions = [ cart.position.clone() ];
-  trail.geometry.setFromPoints(trailPositions);
-  vplot.clear(); splot.clear(); updateCartTransform(); updateUI();
+  if(dom.followBox.checked){camera.position.lerp(new THREE.Vector3(cart.position.x,18,18),0.12);camera.lookAt(cart.position.x,0,0);}else{camera.position.lerp(new THREE.Vector3(0,18,18),0.12);camera.lookAt(0,0,0);}
+  renderer.render(scene,camera);
 }
-function resetAll(){
-  state.t = 0; state.s = 0; state.v = parseFloat(dom.v0.value); state.a = parseFloat(dom.aRange.value);
-  state.boundaryReached = false;
-  state.lastFrame = performance.now();
-  trailPositions = [ cart.position.clone() ];
-  trail.geometry.setFromPoints(trailPositions);
-  vplot.clear(); splot.clear();
-  updateCartTransform(); updateUI();
-}
-
-/* Map physics position s to 3D x: center track at 0, s meters right from start line (-TRACK_LENGTH/2 + 1) */
-function sToX(s){
-  const startX = -TRACK_LENGTH/2 + 1;
-  return startX + s;
-}
-
-/* update cart visuals */
-function updateCartTransform(){
-  cart.position.x = sToX(state.s);
-  cart.position.y = 0;
-  cart.position.z = 0;
-  // rotate wheels approximate
-  if(cart.userData.wheels){
-    cart.userData.wheels.forEach(w=>{
-      w.rotation.x -= (state.v * 0.04); // tuning factor for visual
-    });
-  }
-
-  // Trail update: add current cart position
-  // push only when it actually moved significantly to avoid dense points
-  const last = trailPositions.length ? trailPositions[trailPositions.length-1] : null;
-  const curr = cart.position.clone();
-  if(!last || curr.distanceTo(last) > 0.01){
-    trailPositions.push(curr);
-    if(trailPositions.length > maxTrailPoints) trailPositions.shift();
-    trail.geometry.setFromPoints(trailPositions);
-  }
-
-  updateArrows();
-}
-
-/* ---------- makeTextSprite helper for ticks labels ---------- */
-function makeTextSprite(message, parameters){
-  if(parameters === undefined) parameters = {};
-  const fontface = parameters.fontface || 'Arial';
-  const fontsize = parameters.fontsize || 24;
-  const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
-  context.font = fontsize + "px " + fontface;
-  const metrics = context.measureText(message);
-  const textWidth = metrics.width;
-  canvas.width = textWidth + 20;
-  canvas.height = fontsize + 12;
-  context.fillStyle = "rgba(255,255,255,0.9)";
-  context.fillRect(0,0,canvas.width,canvas.height);
-  context.fillStyle = "black";
-  context.font = fontsize + "px " + fontface;
-  context.fillText(message,10,fontsize);
-  const texture = new THREE.CanvasTexture(canvas);
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({map:texture}));
-  return sprite;
-}
-
-/* ---------- Rendering & update loop ---------- */
-function resizeRenderer(){
-  const rect = dom.container.getBoundingClientRect();
-  width = rect.width; height = rect.height;
-  renderer.setSize(width, Math.max(height, 200));
-  camera.aspect = width / Math.max(height, 200);
-  camera.updateProjectionMatrix();
-
-  // update plots canvas dpi
-  [dom.vPlot, dom.sPlot].forEach(c=>{
-    const DPR = window.devicePixelRatio || 1;
-    const W = c.clientWidth, H = c.clientHeight;
-    c.width = Math.floor(W*DPR); c.height = Math.floor(H*DPR);
-    c.getContext('2d').scale(DPR, DPR);
-  });
-}
-window.addEventListener('resize', ()=>{ resizeRenderer(); });
-
-/* update UI numeric displays */
-function updateUI(){
-  dom.tVal.textContent = state.t.toFixed(2);
-  dom.sVal.textContent = state.s.toFixed(2);
-  dom.vVal.textContent = state.v.toFixed(2);
-  dom.aValDisp.textContent = state.a.toFixed(2);
-}
-
-/* set an initial camera pose so cart and track are visible immediately */
-camera.position.set(0, 18, 18);
-camera.lookAt(0,0,0);
-
-/* animation tick */
-function tick(now){
-  requestAnimationFrame(tick);
-  resizeRenderer();
-
-  if(state.running && !state.boundaryReached){
-    const dt = Math.min((now - (state.lastFrame || now))/1000, 0.05);
-    state.lastFrame = now;
-
-    // Physics (correct kinematic integration using current v and a)
-    // v_next = v + a*dt
-    // s_next = s + v*dt + 0.5*a*dt^2
-    const sPrev = state.s;
-    state.s = state.s + state.v*dt + 0.5*state.a*dt*dt;
-    state.v = state.v + state.a*dt;
-    state.t += dt;
-
-    // Check boundary conditions
-    if (state.s < TRACK_START) {
-      state.s = TRACK_START;
-      state.v = 0;
-      state.running = false;
-      state.boundaryReached = true;
-      dom.startBtn.textContent = 'Start';
-      alert('Cart reached the start of the track. Please reset the simulation.');
-    } else if (state.s > TRACK_END) {
-      state.s = TRACK_END;
-      state.v = 0;
-      state.running = false;
-      state.boundaryReached = true;
-      dom.startBtn.textContent = 'Start';
-      alert('Cart reached the end of the track. Please reset the simulation.');
-    }
-
-    // push to plots
-    vplot.push(state.t, state.v);
-    splot.push(state.t, state.s);
-
-    // update plot visuals (draw)
-    vplot.draw();
-    splot.draw();
-
-    updateCartTransform();
-    updateUI();
-  }
-
-  // camera follow toggle
-  if(dom.followBox.checked){
-    // Aim camera such that track center and cart are visible
-    const cx = cart.position.x;
-    camera.position.lerp(new THREE.Vector3(cx, 18, 18), 0.12);
-    camera.lookAt(cx, 0, 0);
-  } else {
-    camera.position.lerp(new THREE.Vector3(0, 18, 18), 0.12);
-    camera.lookAt(0,0,0);
-  }
-
-  renderer.render(scene, camera);
-}
-resetAll();
-
-/* ensure renderer and plots are sized before first frame */
-resizeRenderer();
-
-/* start the loop */
-tick(performance.now());
-
-/* initial renderer sizing (extra safety) */
-setTimeout(resizeRenderer,50);
-
-/* ensure when toggling vectors we update */
-dom.vectorsBox.addEventListener('change', ()=> updateArrows());
-
-/* ensure plots are cleared on reset */
-function clearPlots(){
-  vplot.clear();
-  splot.clear();
-}
-
-/* stop/resets handlers adjust plots */
-dom.resetBtn.addEventListener('click', ()=>{ clearPlots(); });
-dom.stopBtn.addEventListener('click', ()=>{ clearPlots(); });
-
-/* ---------- end of script ---------- */
+resetAll();resizeRenderer();tick(performance.now());dom.vectorsBox.addEventListener('change',updateArrows);
 </script>
 </body>
 </html>
